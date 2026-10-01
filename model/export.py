@@ -63,6 +63,42 @@ def to_score(logits: np.ndarray, head: str) -> np.ndarray:
     return (e / e.sum(axis=1, keepdims=True))[:, 1]
 
 
+def quantize_embeddings_int8(m: onnx.ModelProto) -> None:
+    """Store embedding tables as int8 with a per-row scale, using only standard ONNX ops.
+
+    ORT's own option (GatherBlockQuantized) is 4-bit only and missing from ORT-web's asyncify build,
+    which is the one that runs WebGPU. Gather -> Cast -> Mul works on every build and EP.
+    """
+    inits = {i.name: i for i in m.graph.initializer}
+    nodes = list(m.graph.node)
+    for idx, node in enumerate(nodes):
+        if node.op_type != "Gather" or node.input[0] not in inits:
+            continue
+        w = onnx.numpy_helper.to_array(inits[node.input[0]])
+        if w.ndim != 2 or w.dtype != np.float32:
+            continue
+        scale = np.abs(w).max(axis=1, keepdims=True) / 127
+        scale[scale == 0] = 1
+        q = np.clip(np.round(w / scale), -127, 127).astype(np.int8)
+
+        base = node.name
+        m.graph.initializer.remove(inits[node.input[0]])
+        m.graph.initializer.extend([
+            onnx.numpy_helper.from_array(q, f"{base}_q"),
+            onnx.numpy_helper.from_array(scale.astype(np.float32), f"{base}_scale"),
+        ])
+        ids, out = node.input[1], node.output[0]
+        new = [
+            onnx.helper.make_node("Gather", [f"{base}_q", ids], [f"{base}_gq"], name=f"{base}_gather_q", axis=0),
+            onnx.helper.make_node("Cast", [f"{base}_gq"], [f"{base}_gf"], name=f"{base}_cast", to=onnx.TensorProto.FLOAT),
+            onnx.helper.make_node("Gather", [f"{base}_scale", ids], [f"{base}_gs"], name=f"{base}_gather_s", axis=0),
+            onnx.helper.make_node("Mul", [f"{base}_gf", f"{base}_gs"], [out], name=f"{base}_dequant"),
+        ]
+        nodes[idx : idx + 1] = new
+    del m.graph.node[:]
+    m.graph.node.extend(nodes)
+
+
 def export(name: str) -> None:
     spec = MODELS[name]
     src = Path(snapshot_download(spec["repo"], allow_patterns=["*.json", "*.safetensors"]))
@@ -97,16 +133,14 @@ def export(name: str) -> None:
         del m.graph.value_info[:]
         onnx.save(m, fp32)
 
-    # 2. Weight-only quantization: 8-bit MatMul weights, then 4-bit token embeddings
-    #    (GatherBlockQuantized only supports 4 bits; leaving embeddings fp32 adds ~170 MB).
+    # 2. Weight-only quantization: 8-bit MatMul weights, then int8 token embeddings
     q8 = ship / "onnx" / "model_quantized.onnx"
-    m = onnx.load(fp32)
-    for bits, op, axis in [(8, "MatMul", 0), (4, "Gather", 1)]:
-        quantizer = MatMulNBitsQuantizer(
-            m, bits=bits, block_size=32, is_symmetric=True, op_types_to_quantize=(op,), quant_axes=((op, axis),)
-        )
-        quantizer.process()
-        m = quantizer.model.model
+    quantizer = MatMulNBitsQuantizer(
+        onnx.load(fp32), bits=8, block_size=32, is_symmetric=True, op_types_to_quantize=("MatMul",)
+    )
+    quantizer.process()
+    m = quantizer.model.model
+    quantize_embeddings_int8(m)
     onnx.save(m, q8)
 
     for f in SHIPPED_FILES:

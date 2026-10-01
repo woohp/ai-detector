@@ -36,5 +36,10 @@ const results = await sw.evaluate(async (samples) => {
 }, SAMPLES);
 
 console.table(results);
+
+// Extension pages share the manifest's COOP/COEP headers; isolation is what enables WASM threads.
+const page = await context.newPage();
+await page.goto(sw.url().replace(/[^/]*$/, 'offscreen.html'));
+console.log('host page:', await page.evaluate(() => ({ crossOriginIsolated, cores: navigator.hardwareConcurrency })));
 await context.close();
 process.exit(results.every((r) => r.ok) ? 0 : 1);

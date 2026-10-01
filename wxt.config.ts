@@ -15,6 +15,9 @@ export default defineConfig({
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
+    // Cross-origin isolation enables SharedArrayBuffer, which ORT needs for multithreaded WASM.
+    cross_origin_embedder_policy: { value: 'require-corp' },
+    cross_origin_opener_policy: { value: 'same-origin' },
     ...(browser === 'firefox' && {
       browser_specific_settings: {
         gecko: {
