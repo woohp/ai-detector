@@ -1,0 +1,29 @@
+{
+  "name": "ai-detector",
+  "description": "Browser extension that scores selected text as human vs AI-generated with a local ONNX model",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "postinstall": "wxt prepare",
+    "export:vanguard": "python model/export.py vanguard",
+    "export:tabularis": "python model/export.py tabularis"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "web-ext": "^10.7.0",
+    "wxt": "^0.21.4"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
+  }
+}
