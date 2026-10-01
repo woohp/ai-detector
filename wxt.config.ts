@@ -3,6 +3,9 @@ import { defineConfig } from 'wxt';
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   manifestVersion: 3,
+  // Generates the 16–128 px PNG icons from one SVG (Chrome doesn't accept SVG manifest icons).
+  modules: ['@wxt-dev/auto-icons'],
+  autoIcons: { baseIconPath: 'assets/icon.svg', developmentIndicator: false },
   manifest: ({ browser }) => ({
     name: 'AI Text Detector',
     description: 'Right-click selected text to estimate whether it was AI-generated, using a local model.',

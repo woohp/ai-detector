@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Source for every icon: PNGs are generated from this at build time (@wxt-dev/auto-icons). -->
+  <rect width="128" height="128" rx="28" fill="#1e293b" />
+  <g fill="none" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#ffffff">
+      <path d="M14 94 L30.5 36 L47 94" /> <!-- A -->
+      <path d="M21 75 H40" />
+      <path d="M62 37 V94" /> <!-- I -->
+    </g>
+    <path stroke="#fbbf24" d="M80 49 C80 30 112 29 112 48 C112 61 97 62 97 74" /> <!-- ? -->
+  </g>
+  <circle cx="97" cy="93" r="4.8" fill="#fbbf24" />
+</svg>
