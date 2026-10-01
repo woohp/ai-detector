@@ -1,5 +1,5 @@
 // Loads the built Chrome extension in Playwright's Chromium and runs detection through the real
-// offscreen document (WASM runtime, CSP, bundled model). Context-menu clicks can't be automated,
+// offscreen document, then through check.html (WASM runtime, CSP, bundled model). Context-menu clicks can't be automated,
 // so this drives the same message the background script sends.
 //   npm run build && node tests/e2e-chromium.mjs
 import { chromium } from 'playwright';
@@ -35,11 +35,27 @@ const results = await sw.evaluate(async (samples) => {
   return out;
 }, SAMPLES);
 
-console.table(results);
+console.table(results.map(({ chunks, ...r }) => ({ ...r, sections: chunks?.length })));
+
+// check.html: paste long mixed text, submit, read the result (page → background port → host).
+const check = await context.newPage();
+await check.goto(sw.url().replace(/[^/]*$/, 'check.html'));
+const mixed = (SAMPLES[0] + ' ').repeat(40) + (SAMPLES[1] + ' ').repeat(25);
+await check.fill('#text', mixed);
+await check.click('#submit');
+await check.waitForSelector('#result:not([hidden]), #status-text:has-text("Error")', { timeout: 120_000 });
+console.log('check.html:', await check.evaluate(() => ({
+  score: document.getElementById('score').textContent,
+  label: document.getElementById('label').textContent,
+  meta: document.getElementById('meta').textContent,
+  sections: [...document.querySelectorAll('.s-score')].map((s) => s.textContent),
+  error: document.getElementById('result').hidden ? document.getElementById('status-text').textContent : undefined,
+})));
 
 // Extension pages share the manifest's COOP/COEP headers; isolation is what enables WASM threads.
+const checkOk = await check.isVisible('#result');
 const page = await context.newPage();
 await page.goto(sw.url().replace(/[^/]*$/, 'offscreen.html'));
 console.log('host page:', await page.evaluate(() => ({ crossOriginIsolated, cores: navigator.hardwareConcurrency })));
 await context.close();
-process.exit(results.every((r) => r.ok) ? 0 : 1);
+process.exit(results.every((r) => r.ok) && checkOk ? 0 : 1);

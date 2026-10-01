@@ -83,12 +83,23 @@ export default defineContentScript({
           open();
           render(['Analyzing…']);
           break;
-        case 'loading':
-          render([`Loading model… ${Math.round(msg.percent)}%`], msg.percent / 100);
+        case 'progress': {
+          const p = msg.progress;
+          // Files read fast; most of the wait after 100% is building the session and warming up.
+          if (p.kind === 'loading') {
+            if (p.percent >= 100) render(['Initializing model…']);
+            else render([`Loading model… ${Math.round(p.percent)}%`], p.percent / 100);
+          } else if (p.total > 1) {
+            render([`Analyzing section ${p.done + 1} of ${p.total}…`], p.done / p.total);
+          } else {
+            render(['Analyzing…']);
+          }
           break;
+        }
         case 'result': {
           const label = msg.score >= 0.5 ? 'Likely AI' : 'Likely human';
-          render([el('span', 'score', `AI score: ${msg.score.toFixed(2)}`), ` · ${label}`], msg.score);
+          const sections = msg.chunks > 1 ? ` (${msg.chunks} sections)` : '';
+          render([el('span', 'score', `AI score: ${msg.score.toFixed(2)}`), ` · ${label}${sections}`], msg.score);
           break;
         }
         case 'error':

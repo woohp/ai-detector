@@ -1,5 +1,5 @@
 // Runs bench.html in Playwright's Chromium and prints its results.
-//   npm run build && node tests/bench-chromium.mjs [webgpu dtypes] [wasm dtypes], e.g. q8,fp16 q8
+//   npm run build && node tests/bench-chromium.mjs [query, e.g. 'webgpu=fp16,q8&wasm=fp16']
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 
@@ -11,7 +11,7 @@ const context = await chromium.launchPersistentContext('', {
 const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
 const page = await context.newPage();
 page.on('console', (m) => console.log('[page]', m.text()));
-await page.goto(sw.url().replace(/[^/]*$/, 'bench.html') + `?dtypes=${process.argv[2] ?? 'q8'}&wasm=${process.argv[3] ?? 'q8'}`);
+await page.goto(sw.url().replace(/[^/]*$/, 'bench.html') + (process.argv[2] ? `?${process.argv[2]}` : ''));
 await page.click('#run');
 await page.waitForFunction(() => document.title === 'done', null, { timeout: 280_000 });
 console.log(await page.textContent('#info'));

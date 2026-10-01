@@ -1,6 +1,6 @@
 // Dev page: open <extension origin>/bench.html. Compares WebGPU and WASM on this browser/machine.
 import { DEVICE_KEY, loadModel, score, type Device } from '@/lib/detector';
-import type { ModelSpec } from '@/lib/models';
+import { DEFAULT_MODEL, MODELS, type ModelSpec } from '@/lib/models';
 
 const SHORT = 'The bridge was closed for three weeks in 1987 after a barge struck one of its piers during a storm.';
 const LONG = 'We missed the 8:15 train so we walked to the next station, got rained on, and ended up eating cold pizza. '.repeat(20);
@@ -64,12 +64,11 @@ document.querySelector('#run')!.addEventListener('click', async () => {
   const gpu = adapter?.info;
   log(gpu ? `WebGPU adapter: ${gpu.vendor} ${gpu.architecture} ${gpu.device} ${gpu.description}${gpu.isFallbackAdapter ? ' (fallback/software)' : ''}` : 'WebGPU: unavailable');
   row(['device', 'load+warm-up ms', 'short #1', 'short #2', '512 tok #1', '512 tok #2', 'max |Δ| vs PyTorch'], true);
-  // ?dtypes=q8,fp16 to also try files exported at other precisions (dev only; not shipped by default).
-  const dtypes = (new URLSearchParams(location.search).get('dtypes') ?? 'q8').split(',') as ModelSpec['dtype'][];
-  for (const dtype of dtypes) if (adapter) await bench('webgpu', dtype);
-  for (const dtype of (new URLSearchParams(location.search).get('wasm') ?? 'q8').split(',') as ModelSpec['dtype'][]) {
-    await bench('wasm', dtype);
-  }
+  // ?webgpu=fp16,q8&wasm=fp16 to try other precisions (their model files must be in public/models).
+  const params = new URLSearchParams(location.search);
+  const dtypes = (device: Device) => (params.get(device) ?? MODELS[DEFAULT_MODEL].dtype).split(',') as ModelSpec['dtype'][];
+  if (adapter) for (const dtype of dtypes('webgpu')) await bench('webgpu', dtype);
+  for (const dtype of dtypes('wasm')) await bench('wasm', dtype);
   log('done');
   document.title = 'done';
 });

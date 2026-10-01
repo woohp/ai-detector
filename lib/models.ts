@@ -11,18 +11,18 @@ export interface ModelSpec {
 }
 
 export const MODELS = {
-  // ModernBERT-large, single logit. model_quantized.onnx is 8-bit weight-only (see model/export.py).
+  // ModernBERT-large, single logit.
   vanguard: {
     dir: 'vanguard',
     head: { kind: 'sigmoid' },
-    dtype: 'q8',
+    dtype: 'fp16',
     maxTokens: 512,
   },
   // ModernBERT-base, two logits [human, AI].
   tabularis: {
     dir: 'tabularis',
     head: { kind: 'softmax', aiIndex: 1 },
-    dtype: 'q8',
+    dtype: 'fp16',
     maxTokens: 512,
   },
 } satisfies Record<string, ModelSpec>;

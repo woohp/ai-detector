@@ -19,7 +19,7 @@ const SAMPLES = [
 ];
 
 const tokenizer = await AutoTokenizer.from_pretrained(name);
-const model = await AutoModelForSequenceClassification.from_pretrained(name, { dtype: 'q8' });
+const model = await AutoModelForSequenceClassification.from_pretrained(name, { dtype: 'fp16' });
 
 for (const text of SAMPLES) {
   const t0 = performance.now();

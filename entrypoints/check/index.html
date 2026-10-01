@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Text Detector</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>AI Text Detector</h1>
+        <p class="muted">Paste text to estimate whether it was AI-generated. The model runs on this device; nothing is sent anywhere.</p>
+      </header>
+
+      <form id="form">
+        <textarea id="text" placeholder="Paste text here…" spellcheck="false" autofocus></textarea>
+        <div class="row">
+          <span id="count" class="muted">0 words</span>
+          <button id="submit" type="submit" disabled>Check <kbd id="shortcut"></kbd></button>
+        </div>
+      </form>
+
+      <section id="status" hidden>
+        <p id="status-text"></p>
+        <div class="track"><div id="status-bar" class="fill"></div></div>
+      </section>
+
+      <section id="result" hidden>
+        <div class="summary">
+          <span id="score" class="score"></span>
+          <div>
+            <p id="label" class="label"></p>
+            <p id="meta" class="muted"></p>
+          </div>
+        </div>
+        <div class="track scale"><div id="marker" class="marker"></div></div>
+        <div class="scale-labels muted"><span>Human</span><span>AI</span></div>
+        <ol id="sections"></ol>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

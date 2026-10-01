@@ -10,6 +10,7 @@ import {
 import type { PublicPath } from 'wxt/browser';
 import ortMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
 import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
+import type { Chunk, DetectResult, Progress } from './messages';
 import { DEFAULT_MODEL, MODELS, type ModelSpec } from './models';
 
 // Everything is loaded from inside the extension package; nothing is fetched remotely.
@@ -107,16 +108,23 @@ async function chooseAndLoad(onProgress?: (percent: number) => void): Promise<Lo
 }
 
 let loading: Promise<Loaded> | null = null;
+/** Everyone waiting on the current load gets its progress, not just the first caller. */
+const loadListeners = new Set<(percent: number) => void>();
 
-function load(onProgress?: (percent: number) => void): Promise<Loaded> {
-  loading ??= chooseAndLoad(onProgress).catch((err) => {
-    loading = null; // allow retry
-    throw err;
-  });
-  return loading;
+async function load(onProgress?: (percent: number) => void): Promise<Loaded> {
+  if (onProgress) loadListeners.add(onProgress);
+  try {
+    loading ??= chooseAndLoad((percent) => loadListeners.forEach((l) => l(percent))).catch((err) => {
+      loading = null; // allow retry
+      throw err;
+    });
+    return await loading;
+  } finally {
+    if (onProgress) loadListeners.delete(onProgress);
+  }
 }
 
-const ZERO_WIDTH = /[​-‏⁠﻿­]/g;
+const ZERO_WIDTH = /[\u200B-\u200F\u2060\uFEFF\u00AD]/g;
 
 /** NFKC + strip zero-width chars + collapse whitespace (recommended by the tabularis model card). */
 export function normalize(text: string): string {
@@ -136,10 +144,53 @@ export async function score({ spec, tokenizer, model }: Loaded, text: string): P
   return exps[spec.head.aiIndex]! / exps.reduce((a, b) => a + b, 0);
 }
 
-export async function detect(text: string, onProgress?: (percent: number) => void): Promise<number> {
-  const loaded = await load(onProgress);
+/**
+ * Splits text into model-sized sections of about equal length, cutting at word starts. Returns
+ * token ids per section; the model only sees maxTokens at once, so long text is scored in parts.
+ */
+function chunk(tokenizer: PreTrainedTokenizer, text: string, maxTokens: number): number[][] {
+  const ids = tokenizer.encode(text, { add_special_tokens: false });
+  const budget = maxTokens - tokenizer.encode('').length; // room left after [CLS] and [SEP]
+  const count = Math.ceil(ids.length / budget);
+  const size = Math.ceil(ids.length / count);
+  const startsWord = (i: number) => /^\s/.test(tokenizer.decode([ids[i]!]));
+
+  const chunks: number[][] = [];
+  let start = 0;
+  for (let n = 1; n < count; n++) {
+    let end = n * size;
+    // Back up a few tokens to a word start so no word is split across sections.
+    for (let back = 0; back < 16 && end - back > start + 1; back++) {
+      if (startsWord(end - back)) {
+        end -= back;
+        break;
+      }
+    }
+    chunks.push(ids.slice(start, end));
+    start = end;
+  }
+  chunks.push(ids.slice(start));
+  return chunks;
+}
+
+/** Scores text of any length: each section separately, overall as the token-weighted mean. */
+export async function detect(text: string, onProgress?: (progress: Progress) => void): Promise<DetectResult> {
+  const loaded = await load((percent) => onProgress?.({ kind: 'loading', percent }));
+  const clean = normalize(text);
+  if (!clean) throw new Error('No text to analyze');
+
   const t0 = performance.now();
-  const result = await score(loaded, text);
-  console.info(`[ai-detector] inference ${Math.round(performance.now() - t0)} ms on ${loaded.device}`);
-  return result;
+  const parts = chunk(loaded.tokenizer, clean, loaded.spec.maxTokens);
+  const chunks: Chunk[] = [];
+  for (const ids of parts) {
+    onProgress?.({ kind: 'analyzing', done: chunks.length, total: parts.length });
+    const part = parts.length === 1 ? clean : loaded.tokenizer.decode(ids).trim();
+    chunks.push({ text: part, tokens: ids.length, score: await score(loaded, part) });
+  }
+  const tokens = chunks.reduce((sum, c) => sum + c.tokens, 0);
+  const overall = chunks.reduce((sum, c) => sum + c.score * c.tokens, 0) / tokens;
+  console.info(
+    `[ai-detector] ${tokens} tokens in ${chunks.length} section(s): ${Math.round(performance.now() - t0)} ms on ${loaded.device}`,
+  );
+  return { score: overall, chunks, device: loaded.device };
 }

@@ -1,15 +1,30 @@
-import type { DetectRequest, DetectResponse, ProgressMessage, UiMessage } from '@/lib/messages';
+import {
+  CHECK_PORT,
+  type CheckReply,
+  type CheckRequest,
+  type DetectRequest,
+  type DetectResponse,
+  type Progress,
+  type ProgressMessage,
+  type UiMessage,
+} from '@/lib/messages';
 
 const MENU_ID = 'detect-ai';
+/**
+ * Fails a check after this long with no progress from the host. Covers the worst wait between
+ * updates: WebGPU hits its 10 s budget, then the WASM fallback loads. Long text keeps reporting
+ * progress per section, so it can take longer overall.
+ */
+const IDLE_TIMEOUT_MS = 60_000;
 
-type RunDetect = (text: string, onProgress: (percent: number) => void) => Promise<DetectResponse>;
+type RunDetect = (text: string, onProgress: (progress: Progress) => void) => Promise<DetectResponse>;
 
 export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => {
     browser.contextMenus.create({ id: MENU_ID, title: 'Check if AI-written', contexts: ['selection'] });
   });
 
-  const runDetect = hostRunDetect();
+  const runDetect = withIdleTimeout(hostRunDetect());
 
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id == null || !info.selectionText) return;
@@ -17,13 +32,51 @@ export default defineBackground(() => {
 
     const ui = await injectUi(target);
     ui({ target: 'content', type: 'analyzing' });
-
-    const res = await runDetect(info.selectionText, (percent) =>
-      ui({ target: 'content', type: 'loading', percent }),
+    const res = await runDetect(info.selectionText, (progress) => ui({ target: 'content', type: 'progress', progress }));
+    ui(
+      res.ok
+        ? { target: 'content', type: 'result', score: res.score, chunks: res.chunks.length }
+        : { target: 'content', type: 'error', error: res.error },
     );
-    ui(res.ok ? { target: 'content', type: 'result', score: res.score } : { target: 'content', type: 'error', error: res.error });
+  });
+
+  // Toolbar button opens the paste-and-check page.
+  browser.action.onClicked.addListener(() => {
+    browser.tabs.create({ url: browser.runtime.getURL('/check.html') });
+  });
+
+  // check.html asks over a port, which streams progress and keeps Firefox's event page alive.
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name !== CHECK_PORT) return;
+    let open = true;
+    port.onDisconnect.addListener(() => (open = false));
+    const reply = (msg: CheckReply) => open && port.postMessage(msg);
+    port.onMessage.addListener(async ({ text }: CheckRequest) => {
+      const res = await runDetect(text, (progress) => reply({ type: 'progress', progress }));
+      reply({ type: 'done', res });
+    });
   });
 });
+
+/** Gives up when the host goes quiet for IDLE_TIMEOUT_MS; each progress update restarts the clock. */
+function withIdleTimeout(run: RunDetect): RunDetect {
+  return (text, onProgress) =>
+    new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => resolve({ ok: false, error: `No progress for ${IDLE_TIMEOUT_MS / 1000} s` }), IDLE_TIMEOUT_MS);
+      };
+      arm();
+      run(text, (progress) => {
+        arm();
+        onProgress(progress);
+      }).then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      });
+    });
+}
 
 /** Injects the tooltip content script into the frame and returns a sender for it. */
 async function injectUi({ tabId, frameId }: { tabId: number; frameId: number }) {
@@ -47,11 +100,11 @@ async function injectUi({ tabId, frameId }: { tabId: number; frameId: number }) 
  * same page in a hidden iframe. Either way we talk to it via runtime messages.
  */
 function hostRunDetect(): RunDetect {
-  const progressHandlers = new Map<string, (percent: number) => void>();
+  const progressHandlers = new Map<string, (progress: Progress) => void>();
 
   browser.runtime.onMessage.addListener((msg: ProgressMessage) => {
     if (msg?.target === 'background' && msg.type === 'progress') {
-      progressHandlers.get(msg.requestId)?.(msg.percent);
+      progressHandlers.get(msg.requestId)?.(msg.progress);
     }
   });
 

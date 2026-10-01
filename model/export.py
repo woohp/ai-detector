@@ -1,17 +1,17 @@
-"""Export a Hugging Face AI-text detector to ONNX (fp32 + 8-bit) in Transformers.js layout.
+"""Export a Hugging Face AI-text detector to ONNX (fp32 + fp16) in Transformers.js layout.
 
     python model/export.py vanguard
 
 Writes:
   model/out/<name>/model.onnx                        fp32, kept locally for parity checks only
   public/models/<name>/{config,tokenizer*}.json      shipped with the extension
-  public/models/<name>/onnx/model_quantized.onnx     8-bit weight-only (loaded as dtype "q8"), shipped
+  public/models/<name>/onnx/model_fp16.onnx         fp16 (Transformers.js dtype "fp16"), shipped
 
-Then compares PyTorch vs ONNX fp32 vs ONNX 8-bit scores on sample texts.
+Then compares PyTorch vs ONNX fp32 vs ONNX fp16 scores on sample texts.
 
-Why weight-only and not onnxruntime's quantize_dynamic: dynamic int8 also quantizes activations
-per tensor, which moved Vanguard's scores by up to 0.15 (worse under ORT's WASM kernels than native).
-Weight-only MatMulNBits keeps activations fp32: max error ~0.005, identical on WASM and native.
+Why fp16 and not 8-bit: on WebGPU, 8-bit weight-only (MatMulNBits) was barely faster than WASM
+(1.7 s vs 2.0 s at 512 tokens), while fp16 ran 0.11 s, with WASM speed unchanged and lower error.
+Dynamic int8 (quantize_dynamic) was worse still: up to 0.15 score error. See commit 34a3e60.
 """
 
 import argparse
@@ -23,7 +23,7 @@ import onnx
 import onnxruntime as ort
 import torch
 from huggingface_hub import snapshot_download
-from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
+from onnxruntime.transformers.float16 import convert_float_to_float16
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,42 +63,6 @@ def to_score(logits: np.ndarray, head: str) -> np.ndarray:
     return (e / e.sum(axis=1, keepdims=True))[:, 1]
 
 
-def quantize_embeddings_int8(m: onnx.ModelProto) -> None:
-    """Store embedding tables as int8 with a per-row scale, using only standard ONNX ops.
-
-    ORT's own option (GatherBlockQuantized) is 4-bit only and missing from ORT-web's asyncify build,
-    which is the one that runs WebGPU. Gather -> Cast -> Mul works on every build and EP.
-    """
-    inits = {i.name: i for i in m.graph.initializer}
-    nodes = list(m.graph.node)
-    for idx, node in enumerate(nodes):
-        if node.op_type != "Gather" or node.input[0] not in inits:
-            continue
-        w = onnx.numpy_helper.to_array(inits[node.input[0]])
-        if w.ndim != 2 or w.dtype != np.float32:
-            continue
-        scale = np.abs(w).max(axis=1, keepdims=True) / 127
-        scale[scale == 0] = 1
-        q = np.clip(np.round(w / scale), -127, 127).astype(np.int8)
-
-        base = node.name
-        m.graph.initializer.remove(inits[node.input[0]])
-        m.graph.initializer.extend([
-            onnx.numpy_helper.from_array(q, f"{base}_q"),
-            onnx.numpy_helper.from_array(scale.astype(np.float32), f"{base}_scale"),
-        ])
-        ids, out = node.input[1], node.output[0]
-        new = [
-            onnx.helper.make_node("Gather", [f"{base}_q", ids], [f"{base}_gq"], name=f"{base}_gather_q", axis=0),
-            onnx.helper.make_node("Cast", [f"{base}_gq"], [f"{base}_gf"], name=f"{base}_cast", to=onnx.TensorProto.FLOAT),
-            onnx.helper.make_node("Gather", [f"{base}_scale", ids], [f"{base}_gs"], name=f"{base}_gather_s", axis=0),
-            onnx.helper.make_node("Mul", [f"{base}_gf", f"{base}_gs"], [out], name=f"{base}_dequant"),
-        ]
-        nodes[idx : idx + 1] = new
-    del m.graph.node[:]
-    m.graph.node.extend(nodes)
-
-
 def export(name: str) -> None:
     spec = MODELS[name]
     src = Path(snapshot_download(spec["repo"], allow_patterns=["*.json", "*.safetensors"]))
@@ -128,20 +92,14 @@ def export(name: str) -> None:
             external_data=False,
         )
         # The exporter leaves stale intermediate shape annotations that fail onnx shape inference
-        # during quantization ("Inferred shape and existing shape differ"). They're optional hints.
+        # ("Inferred shape and existing shape differ"). They are optional hints.
         m = onnx.load(fp32)
         del m.graph.value_info[:]
         onnx.save(m, fp32)
 
-    # 2. Weight-only quantization: 8-bit MatMul weights, then int8 token embeddings
-    q8 = ship / "onnx" / "model_quantized.onnx"
-    quantizer = MatMulNBitsQuantizer(
-        onnx.load(fp32), bits=8, block_size=32, is_symmetric=True, op_types_to_quantize=("MatMul",)
-    )
-    quantizer.process()
-    m = quantizer.model.model
-    quantize_embeddings_int8(m)
-    onnx.save(m, q8)
+    # 2. fp16 weights and activations; inputs/outputs stay int64/fp32
+    fp16 = ship / "onnx" / "model_fp16.onnx"
+    onnx.save(convert_float_to_float16(onnx.load(fp32), keep_io_types=True), fp16)
 
     for f in SHIPPED_FILES:
         if (src / f).exists():
@@ -153,13 +111,13 @@ def export(name: str) -> None:
     with torch.no_grad():
         ref = to_score(model(**{k: torch.from_numpy(v) for k, v in feeds.items()}).logits.numpy(), spec["head"])
 
-    print(f"\n{'sample':<50} {'torch':>7} {'fp32':>7} {'8-bit':>7}")
+    print(f"\n{'sample':<50} {'torch':>7} {'fp32':>7} {'fp16':>7}")
     scores = {}
-    for label, path in [("fp32", fp32), ("8-bit", q8)]:
+    for label, path in [("fp32", fp32), ("fp16", fp16)]:
         sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
         scores[label] = to_score(sess.run(["logits"], feeds)[0], spec["head"])
     for i, text in enumerate(SAMPLES):
-        print(f"{text[:48]:<50} {ref[i]:7.4f} {scores['fp32'][i]:7.4f} {scores['8-bit'][i]:7.4f}")
+        print(f"{text[:48]:<50} {ref[i]:7.4f} {scores['fp32'][i]:7.4f} {scores['fp16'][i]:7.4f}")
     for label in scores:
         print(f"max |torch - {label}| = {np.abs(ref - scores[label]).max():.4f}")
     print(f"\nShipped: {ship}  ({sum(p.stat().st_size for p in ship.rglob('*') if p.is_file()) / 1e6:.0f} MB)")

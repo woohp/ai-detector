@@ -12,12 +12,17 @@ export default defineConfig({
       'scripting',
       ...(browser === 'firefox' ? [] : ['offscreen']),
     ],
+    // No popup: clicking the toolbar button opens check.html (see background.ts).
+    action: { default_title: 'Check text for AI writing' },
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
     // Cross-origin isolation enables SharedArrayBuffer, which ORT needs for multithreaded WASM.
-    cross_origin_embedder_policy: { value: 'require-corp' },
-    cross_origin_opener_policy: { value: 'same-origin' },
+    // Firefox doesn't support these keys, so its WASM fallback runs single-threaded.
+    ...(browser !== 'firefox' && {
+      cross_origin_embedder_policy: { value: 'require-corp' },
+      cross_origin_opener_policy: { value: 'same-origin' },
+    }),
     ...(browser === 'firefox' && {
       browser_specific_settings: {
         gecko: {
