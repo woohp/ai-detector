@@ -3,6 +3,8 @@ import { defineConfig } from 'wxt';
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   manifestVersion: 3,
+  // Source zips are only for store review; we don't publish.
+  zip: { zipSources: false },
   // Generates the 16–128 px PNG icons from one SVG (Chrome doesn't accept SVG manifest icons).
   modules: ['@wxt-dev/auto-icons'],
   autoIcons: { baseIconPath: 'assets/icon.svg', developmentIndicator: false },

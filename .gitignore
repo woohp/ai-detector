@@ -29,5 +29,6 @@ web-ext.config.ts
 public/models/
 
 # Python / model export
+.venv/
 model/out/
 __pycache__/

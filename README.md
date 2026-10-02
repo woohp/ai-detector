@@ -12,6 +12,23 @@ Text longer than the model's 512-token window is split into sections of about eq
 cut at word boundaries. Each section is scored, and the overall score is their mean, weighted by token count.
 The page lists the score for each section. The tooltip shows the overall score and how many sections there were.
 
+## Install
+
+Requires Node.js and Python 3.10+. From a clone of this repo, run the line for your browser:
+
+```sh
+npm run bundle:chrome
+npm run bundle:firefox
+```
+
+This installs dependencies, exports the model (first run only: downloads PyTorch and the model,
+takes several minutes), and builds and zips the extension into `.output/`. Then load it:
+
+- **Chrome:** `chrome://extensions` → enable Developer mode → **Load unpacked** → `.output/chrome-mv3/`
+  (or unzip `ai-detector-*-chrome.zip` and pick that folder).
+- **Firefox:** `about:debugging` → This Firefox → **Load Temporary Add-on** → `ai-detector-*-firefox.zip`
+  or `.output/firefox-mv3/manifest.json`. Temporary add-ons are removed when Firefox restarts.
+
 ## Model
 
 This extension uses the [Vanguard AI text detector model](https://huggingface.co/ShantanuT01/vanguard-ai-text-detector).
@@ -46,7 +63,7 @@ tests/e2e-chromium.mjs      loads the built extension in Playwright Chromium, ru
 tests/bench-chromium.mjs    runs bench.html in Playwright Chromium
 ```
 
-## Setup
+## Development
 
 Requires Node.js and Python 3.10+.
 
@@ -69,10 +86,7 @@ npm run build          # or build:chrome / build:firefox; output in .output/
 npm run zip            # or zip:chrome / zip:firefox; zipped builds in .output/
 ```
 
-Load the build into a browser:
-
-- **Chrome:** `chrome://extensions` → enable Developer mode → **Load unpacked** → `.output/chrome-mv3/`.
-- **Firefox:** `about:debugging` → This Firefox → **Load Temporary Add-on** → `.output/firefox-mv3/manifest.json`.
+Load the build as described in [Install](#install).
 
 For development, `npm run dev:chrome` or `npm run dev:firefox` launches the browser with the
 extension installed and reloads it on changes.

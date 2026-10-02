@@ -5,6 +5,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "bundle:chrome": "node scripts/bundle.mjs chrome",
+    "bundle:firefox": "node scripts/bundle.mjs firefox",
     "build": "npm run build:chrome && npm run build:firefox",
     "build:chrome": "wxt build -b chrome",
     "build:firefox": "wxt build -b firefox",
