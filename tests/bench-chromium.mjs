@@ -1,5 +1,5 @@
 // Runs bench.html in Playwright's Chromium and prints its results.
-//   npm run build && node tests/bench-chromium.mjs [query, e.g. 'webgpu=fp16,q8&wasm=fp16']
+//   npm run build:chrome && node tests/bench-chromium.mjs [query, e.g. 'webgpu=fp16,q8&wasm=fp16']
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 

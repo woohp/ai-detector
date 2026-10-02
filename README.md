@@ -62,13 +62,24 @@ pip install -r model/requirements.txt
 npm run export:vanguard    # downloads from Hugging Face, writes public/models/vanguard/
 ```
 
-Then build and run:
+Then build for both browsers:
 
 ```sh
-npm run dev            # Chrome
-npm run dev:firefox    # Firefox
-npm run zip && npm run zip:firefox
+npm run build          # or build:chrome / build:firefox; output in .output/
+npm run zip            # or zip:chrome / zip:firefox; zipped builds in .output/
+```
 
-node model/smoke.mjs vanguard          # Node check of shipped files
-npm run build && node tests/e2e-chromium.mjs
+Load the build into a browser:
+
+- **Chrome:** `chrome://extensions` → enable Developer mode → **Load unpacked** → `.output/chrome-mv3/`.
+- **Firefox:** `about:debugging` → This Firefox → **Load Temporary Add-on** → `.output/firefox-mv3/manifest.json`.
+
+For development, `npm run dev:chrome` or `npm run dev:firefox` launches the browser with the
+extension installed and reloads it on changes.
+
+Tests (Chromium via Playwright):
+
+```sh
+node model/smoke.mjs vanguard                           # Node check of shipped model files
+npm run build:chrome && node tests/e2e-chromium.mjs     # end to end
 ```

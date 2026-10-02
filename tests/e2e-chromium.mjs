@@ -1,7 +1,7 @@
 // Loads the built Chrome extension in Playwright's Chromium and runs detection through the real
 // offscreen document, then through check.html (WASM runtime, CSP, bundled model). Context-menu clicks can't be automated,
 // so this drives the same message the background script sends.
-//   npm run build && node tests/e2e-chromium.mjs
+//   npm run build:chrome && node tests/e2e-chromium.mjs
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 
