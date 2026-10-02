@@ -48,10 +48,23 @@ tests/bench-chromium.mjs    runs bench.html in Playwright Chromium
 
 ## Setup
 
+Requires Node.js and Python 3.10+.
+
 ```sh
 npm install
-source ~/projects/pytorch_ext/.venv/bin/activate   # or any venv with model/requirements.txt
-npm run export:vanguard                            # writes public/models/vanguard/
+```
+
+Export the model once. Activate any Python environment (venv, conda, etc.) and install the
+exporter's dependencies (PyTorch, Transformers, ONNX, ONNX Runtime, onnxscript):
+
+```sh
+pip install -r model/requirements.txt
+npm run export:vanguard    # downloads from Hugging Face, writes public/models/vanguard/
+```
+
+Then build and run:
+
+```sh
 npm run dev            # Chrome
 npm run dev:firefox    # Firefox
 npm run zip && npm run zip:firefox
