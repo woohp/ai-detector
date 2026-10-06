@@ -6,10 +6,14 @@ import {
   type DetectResponse,
   type Progress,
   type ProgressMessage,
+  type Segment,
+  type TranscriptResponse,
   type UiMessage,
 } from '@/lib/messages';
+import { grabTranscript } from '@/lib/youtube';
 
 const MENU_ID = 'detect-ai';
+const TRANSCRIPT_MENU_ID = 'detect-ai-transcript';
 /**
  * Fails a check after this long with no progress from the host. Covers the worst wait between
  * updates: WebGPU hits its 10 s budget, then the WASM fallback loads. Long text keeps reporting
@@ -17,14 +21,36 @@ const MENU_ID = 'detect-ai';
  */
 const IDLE_TIMEOUT_MS = 60_000;
 
-type RunDetect = (text: string, onProgress: (progress: Progress) => void) => Promise<DetectResponse>;
+type RunDetect = (
+  text: string,
+  onProgress: (progress: Progress) => void,
+  segments?: Segment[],
+) => Promise<DetectResponse>;
 
 export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => {
     browser.contextMenus.create({ id: MENU_ID, title: 'Check if AI-written', contexts: ['selection'] });
+    browser.contextMenus.create({
+      id: TRANSCRIPT_MENU_ID,
+      title: "Check this video's transcript",
+      contexts: ['page', 'link', 'video', 'image'],
+      documentUrlPatterns: ['*://www.youtube.com/watch*', '*://m.youtube.com/watch*'],
+    });
   });
 
+  /** Transcripts being fetched, keyed by the id in the check.html?transcript=<id> that shows them. */
+  const transcripts = new Map<string, Promise<TranscriptResponse>>();
+
   const runDetect = withIdleTimeout(hostRunDetect());
+
+  // Open the results page right away; it shows progress while the transcript loads.
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId !== TRANSCRIPT_MENU_ID || tab?.id == null) return;
+    const id = crypto.randomUUID();
+    transcripts.set(id, fetchTranscript(tab.id));
+    setTimeout(() => transcripts.delete(id), 10 * 60_000);
+    browser.tabs.create({ url: browser.runtime.getURL(`/check.html?transcript=${id}`), index: tab.index + 1, openerTabId: tab.id });
+  });
 
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id == null || !info.selectionText) return;
@@ -51,8 +77,16 @@ export default defineBackground(() => {
     let open = true;
     port.onDisconnect.addListener(() => (open = false));
     const reply = (msg: CheckReply) => open && port.postMessage(msg);
-    port.onMessage.addListener(async ({ text }: CheckRequest) => {
-      const res = await runDetect(text, (progress) => reply({ type: 'progress', progress }));
+    port.onMessage.addListener(async (req: CheckRequest) => {
+      if (req.type === 'transcript') {
+        const res = (await transcripts.get(req.id)) ?? {
+          ok: false,
+          error: "This transcript is no longer available; check the video again from its page",
+        };
+        reply({ type: 'transcript', res });
+        return;
+      }
+      const res = await runDetect(req.text, (progress) => reply({ type: 'progress', progress }), req.segments);
       reply({ type: 'done', res });
     });
   });
@@ -60,7 +94,7 @@ export default defineBackground(() => {
 
 /** Gives up when the host goes quiet for IDLE_TIMEOUT_MS; each progress update restarts the clock. */
 function withIdleTimeout(run: RunDetect): RunDetect {
-  return (text, onProgress) =>
+  return (text, onProgress, segments) =>
     new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout>;
       const arm = () => {
@@ -68,14 +102,28 @@ function withIdleTimeout(run: RunDetect): RunDetect {
         timer = setTimeout(() => resolve({ ok: false, error: `No progress for ${IDLE_TIMEOUT_MS / 1000} s` }), IDLE_TIMEOUT_MS);
       };
       arm();
-      run(text, (progress) => {
-        arm();
-        onProgress(progress);
-      }).then((res) => {
+      run(
+        text,
+        (progress) => {
+          arm();
+          onProgress(progress);
+        },
+        segments,
+      ).then((res) => {
         clearTimeout(timer);
         resolve(res);
       });
     });
+}
+
+/** Runs grabTranscript in the YouTube page (allowed by activeTab, granted by the menu click). */
+async function fetchTranscript(tabId: number): Promise<TranscriptResponse> {
+  try {
+    const [first] = await browser.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: grabTranscript });
+    return (first?.result as TranscriptResponse | undefined) ?? { ok: false, error: 'Could not read this page' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Injects the tooltip content script into the frame and returns a sender for it. */
@@ -129,12 +177,12 @@ function hostRunDetect(): RunDetect {
     await creating;
   }
 
-  return async (text, onProgress) => {
+  return async (text, onProgress, segments) => {
     await ensureHost();
     const requestId = crypto.randomUUID();
     progressHandlers.set(requestId, onProgress);
     try {
-      const req: DetectRequest = { target: 'host', type: 'detect', requestId, text };
+      const req: DetectRequest = { target: 'host', type: 'detect', requestId, text, segments };
       return await browser.runtime.sendMessage(req);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

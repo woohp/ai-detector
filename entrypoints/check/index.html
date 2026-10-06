@@ -14,6 +14,12 @@
         <p class="muted">Paste text to estimate whether it was AI-generated. The model runs on this device; nothing is sent anywhere.</p>
       </header>
 
+      <section id="video" hidden>
+        <p id="video-status" class="muted"></p>
+        <h2><a id="video-title" target="_blank" rel="noopener"></a></h2>
+        <p id="video-meta" class="muted"></p>
+      </section>
+
       <form id="form">
         <textarea id="text" placeholder="Paste text here…" spellcheck="false" autofocus></textarea>
         <div class="row">
@@ -37,6 +43,9 @@
         </div>
         <div class="track scale"><div id="marker" class="marker"></div></div>
         <div class="scale-labels muted"><span>Human</span><span>AI</span></div>
+        <p id="sections-note" class="muted" hidden>
+          Single sections are noisy: in human videos, some reached 0.9. Go by the overall score.
+        </p>
         <ol id="sections"></ol>
       </section>
     </main>

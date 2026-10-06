@@ -10,7 +10,7 @@ import {
 import type { PublicPath } from 'wxt/browser';
 import ortMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
 import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
-import type { Chunk, DetectResult, Progress } from './messages';
+import type { Chunk, DetectResult, Progress, Segment } from './messages';
 import { DEFAULT_MODEL, MODELS, type ModelSpec } from './models';
 
 // Everything is loaded from inside the extension package; nothing is fetched remotely.
@@ -173,19 +173,59 @@ function chunk(tokenizer: PreTrainedTokenizer, text: string, maxTokens: number):
   return chunks;
 }
 
-/** Scores text of any length: each section separately, overall as the token-weighted mean. */
-export async function detect(text: string, onProgress?: (progress: Progress) => void): Promise<DetectResult> {
+/**
+ * Groups transcript lines into model-sized sections of about equal length, cutting only between
+ * lines so each section starts at a caption timestamp.
+ */
+function chunkSegments(tokenizer: PreTrainedTokenizer, segments: Segment[], maxTokens: number) {
+  const budget = maxTokens - tokenizer.encode('').length;
+  const lines = segments
+    .map((s) => ({ ms: s.ms, text: normalize(s.text) }))
+    .filter((s) => s.text)
+    .map((s) => ({ ...s, tokens: Math.min(tokenizer.encode(s.text, { add_special_tokens: false }).length, budget) }));
+  const total = lines.reduce((sum, l) => sum + l.tokens, 0);
+  const target = total / Math.ceil(total / budget);
+
+  const parts: { text: string; tokens: number; startMs: number }[] = [];
+  let current: (typeof parts)[number] | null = null;
+  for (const line of lines) {
+    if (current && (current.tokens + line.tokens > budget || current.tokens >= target)) {
+      parts.push(current);
+      current = null;
+    }
+    current ??= { text: '', tokens: 0, startMs: line.ms };
+    current.text += (current.text ? ' ' : '') + line.text;
+    current.tokens += line.tokens;
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+/**
+ * Scores text of any length: each section separately, overall as the token-weighted mean.
+ * With transcript segments, sections follow caption lines and carry their start time.
+ */
+export async function detect(
+  text: string,
+  onProgress?: (progress: Progress) => void,
+  segments?: Segment[],
+): Promise<DetectResult> {
   const loaded = await load((percent) => onProgress?.({ kind: 'loading', percent }));
   const clean = normalize(text);
   if (!clean) throw new Error('No text to analyze');
 
   const t0 = performance.now();
-  const parts = chunk(loaded.tokenizer, clean, loaded.spec.maxTokens);
+  const { tokenizer, spec } = loaded;
+  const parts: { text: string; tokens: number; startMs?: number }[] = segments?.length
+    ? chunkSegments(tokenizer, segments, spec.maxTokens)
+    : chunk(tokenizer, clean, spec.maxTokens).map((ids, _, all) => ({
+        text: all.length === 1 ? clean : tokenizer.decode(ids).trim(),
+        tokens: ids.length,
+      }));
   const chunks: Chunk[] = [];
-  for (const ids of parts) {
+  for (const part of parts) {
     onProgress?.({ kind: 'analyzing', done: chunks.length, total: parts.length });
-    const part = parts.length === 1 ? clean : loaded.tokenizer.decode(ids).trim();
-    chunks.push({ text: part, tokens: ids.length, score: await score(loaded, part) });
+    chunks.push({ ...part, score: await score(loaded, part.text) });
   }
   const tokens = chunks.reduce((sum, c) => sum + c.tokens, 0);
   const overall = chunks.reduce((sum, c) => sum + c.score * c.tokens, 0) / tokens;

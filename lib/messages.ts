@@ -1,10 +1,18 @@
 /** Messages between background, the inference host (offscreen doc), the content script, and check.html. */
 
+/** One caption line: start time and text. */
+export interface Segment {
+  ms: number;
+  text: string;
+}
+
 export interface DetectRequest {
   target: 'host';
   type: 'detect';
   requestId: string;
   text: string;
+  /** Transcript lines. When given, sections are cut between lines and carry time ranges. */
+  segments?: Segment[];
 }
 
 export interface Chunk {
@@ -12,6 +20,8 @@ export interface Chunk {
   text: string;
   tokens: number;
   score: number;
+  /** Start of the section's first caption line (transcripts only). */
+  startMs?: number;
 }
 
 export interface DetectResult {
@@ -45,9 +55,25 @@ export type UiMessage =
   | { target: 'content'; type: 'result'; score: number; chunks: number }
   | { target: 'content'; type: 'error'; error: string };
 
+export type TranscriptResponse =
+  | {
+      ok: true;
+      videoId: string;
+      title: string;
+      durationMs: number;
+      /** YouTube's speech recognition rather than captions uploaded by the creator. */
+      autoCaptions: boolean;
+      segments: Segment[];
+    }
+  | { ok: false; error: string };
+
 /** check.html ↔ background, over a runtime port named CHECK_PORT. */
 export const CHECK_PORT = 'check';
-export interface CheckRequest {
-  text: string;
-}
-export type CheckReply = { type: 'progress'; progress: Progress } | { type: 'done'; res: DetectResponse };
+export type CheckRequest =
+  | { type: 'detect'; text: string; segments?: Segment[] }
+  /** Transcript the background is fetching for the check.html?transcript=<id> it opened. */
+  | { type: 'transcript'; id: string };
+export type CheckReply =
+  | { type: 'progress'; progress: Progress }
+  | { type: 'done'; res: DetectResponse }
+  | { type: 'transcript'; res: TranscriptResponse };

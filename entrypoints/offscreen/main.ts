@@ -5,10 +5,14 @@ import type { DetectRequest, DetectResponse, ProgressMessage } from '@/lib/messa
 
 async function handleDetect(req: DetectRequest): Promise<DetectResponse> {
   try {
-    const result = await detect(req.text, (progress) => {
-      const msg: ProgressMessage = { target: 'background', type: 'progress', requestId: req.requestId, progress };
-      browser.runtime.sendMessage(msg).catch(() => {});
-    });
+    const result = await detect(
+      req.text,
+      (progress) => {
+        const msg: ProgressMessage = { target: 'background', type: 'progress', requestId: req.requestId, progress };
+        browser.runtime.sendMessage(msg).catch(() => {});
+      },
+      req.segments,
+    );
     return { ok: true, ...result };
   } catch (err) {
     console.error(err);

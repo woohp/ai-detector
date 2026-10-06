@@ -12,6 +12,14 @@ Text longer than the model's 512-token window is split into sections of about eq
 cut at word boundaries. Each section is scored, and the overall score is their mean, weighted by token count.
 The page lists the score for each section. The tooltip shows the overall score and how many sections there were.
 
+On a YouTube video page, right-click anywhere outside the player → **Check this video's transcript**
+(right-clicking the player itself shows YouTube's own menu). The check page opens with the
+transcript, preferring captions uploaded by the creator over auto-generated ones, and each section
+links to its time in the video. Transcripts use wider labels: below 0.4 likely human, 0.4–0.6
+unclear, above 0.6 likely AI. Experimental: in a small test, 46 human videos scored 0.47 or below
+(median 0.31 for 2025–26 videos, whose auto-captions include punctuation), and suspected AI
+narration 0.67–0.99.
+
 ## Install
 
 Requires Node.js and Python 3.10+. From a clone of this repo, run the line for your browser:
@@ -52,6 +60,7 @@ Compare devices on any browser by opening `<extension origin>/bench.html`
 ```
 entrypoints/background.ts   context menu, toolbar button, relays the tooltip and check.html to the inference host
 entrypoints/check/          paste-and-check page (talks to the background over a runtime port)
+lib/youtube.ts              grabs a video's transcript from the YouTube page via the player's own caption request
 entrypoints/offscreen/      inference host page (Chrome: offscreen document, Firefox: iframe in background page)
 entrypoints/content.ts      tooltip UI, injected on demand (activeTab, no host permissions)
 lib/detector.ts             Transformers.js setup, chunking, tokenize → logits → score
@@ -96,4 +105,5 @@ Tests (Chromium via Playwright):
 ```sh
 node model/smoke.mjs vanguard                           # Node check of shipped model files
 npm run build:chrome && node tests/e2e-chromium.mjs     # end to end
+npm run build:chrome && node tests/youtube-chromium.mjs # real YouTube videos, in a visible window
 ```
